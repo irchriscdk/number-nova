@@ -11,6 +11,7 @@ The whole game is a single file, `index.html`, with no dependencies. Open it in 
 - Levels speed up every 10 correct answers; streak and speed bonuses
 - End-of-game summary with accuracy and a "Practice these" list of missed problems
 - High scores saved per mission and rank
+- Hangar: earn Stardust from your score and spend it on new hulls, paint jobs, weapons, engine trails and explosion effects. Upgrades raise your Ship Power and rank title, but they're purely cosmetic: every ship plays exactly the same.
 
 ## Controls
 

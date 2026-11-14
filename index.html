@@ -31,6 +31,31 @@
   .missed span{display:inline-block;background:#1a1440;border:1px solid #3d3380;border-radius:.4em;padding:0 .5em;margin:.15em}
   .new{color:var(--gold);font-weight:bold;font-size:1.2em;animation:pulse 1s infinite alternate}
   @keyframes pulse{from{opacity:.6}to{opacity:1}}
+  .menuRow{display:flex;gap:.8em;align-items:center;justify-content:center}
+  button.big.alt{background:linear-gradient(180deg,#2d7fa0,#1b4f7a);border-color:var(--accent)}
+  .dust{color:var(--gold);font-weight:bold}
+  .power{color:var(--accent);font-weight:bold}
+  .earned{color:var(--gold);font-weight:bold;font-size:1.15em;margin-bottom:.3em}
+  #hangar{justify-content:flex-start;padding:1em 1.4em}
+  #hangar h2{font-size:2em;margin:0}
+  .hgTop{display:flex;align-items:baseline;gap:1.6em;margin:.2em 0 .7em;font-size:1.05em}
+  .hgBody{display:flex;gap:1em;width:100%;flex:1;min-height:0}
+  canvas#preview{width:15em;height:19em;flex:none;border:2px solid #3d3380;box-shadow:none;border-radius:.6em}
+  .hgRight{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+  .tabs{display:flex;gap:.3em;flex-wrap:wrap;margin-bottom:.5em}
+  .tabs button{font-size:.85em;padding:.3em .75em}
+  .items{display:grid;grid-template-columns:1fr 1fr;gap:.45em;overflow:auto;align-content:start;padding:.2em}
+  .item{text-align:left;display:flex;flex-direction:column;gap:.1em;padding:.45em .7em}
+  .item .nm{font-weight:bold}
+  .item .ds{font-size:.75em;opacity:.7}
+  .item .pr{font-size:.82em;color:var(--gold);margin-top:.15em}
+  .item.equipped{border-color:var(--good);background:#123a2c}
+  .item.equipped .pr{color:var(--good)}
+  .item.owned .pr{color:var(--accent)}
+  .item.locked{opacity:.6}
+  .item.locked .pr{color:#ff9aa8}
+  .item.bought{animation:pop .5s}
+  @keyframes pop{0%{transform:scale(1)}40%{transform:scale(1.08);box-shadow:0 0 1.2em var(--gold)}100%{transform:scale(1)}}
   #hudBtns{position:absolute;right:.6em;bottom:.6em;display:flex;gap:.4em}
   #hudBtns button{font-size:.85em;padding:.25em .6em;background:#120e2ecc}
 </style>
@@ -52,8 +77,12 @@
       <div class="row" id="opRow"></div>
       <div class="label">Rank</div>
       <div class="row" id="diffRow"></div>
-      <button class="big" id="btnStart">LAUNCH</button>
+      <div class="menuRow">
+        <button class="big" id="btnStart">LAUNCH</button>
+        <button class="big alt" id="btnHangar">HANGAR</button>
+      </div>
       <div class="hi" id="menuHi"></div>
+      <div class="hi"><span class="dust" id="menuDust"></span> · <span class="power" id="menuPower"></span></div>
       <div class="hint">← → or A / D to move · Space to fire · P pause · M mute<br>Mouse or touch: move to steer, click or tap to fire</div>
     </div>
 
@@ -68,6 +97,7 @@
     <div id="over" class="overlay hidden">
       <h2>MISSION OVER</h2>
       <div id="newHi" class="new hidden">★ NEW HIGH SCORE ★</div>
+      <div class="earned" id="earned"></div>
       <div class="stats" id="stats"></div>
       <div id="missedWrap" class="hidden">
         <div class="label">Practice these</div>
@@ -76,7 +106,20 @@
       <div class="row">
         <button class="big" id="btnAgain">PLAY AGAIN</button>
       </div>
-      <div class="row" style="margin-top:.8em"><button id="btnMenu">Change mission</button></div>
+      <div class="row" style="margin-top:.8em"><button id="btnOverHangar">Visit hangar</button><button id="btnMenu">Change mission</button></div>
+    </div>
+
+    <div id="hangar" class="overlay hidden">
+      <h2>HANGAR</h2>
+      <div class="hgTop"><span class="dust" id="hgDust"></span><span class="power" id="hgPower"></span></div>
+      <div class="hgBody">
+        <canvas id="preview"></canvas>
+        <div class="hgRight">
+          <div class="tabs" id="tabs"></div>
+          <div class="items" id="items"></div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:.7em"><button id="btnHgBack">Back</button></div>
     </div>
   </div>
 </div>
@@ -140,16 +183,18 @@ const sfx = {
   miss: () => { noise(.6, .3); tone(160, .5, 'sawtooth', .07, -100); },
   level: () => [392, 523, 659, 784, 1046, 1318].forEach((f, i) => tone(f, .16, 'square', .05, 0, i * .09)),
   over: () => [440, 370, 311, 262].forEach((f, i) => tone(f, .3, 'triangle', .09, 0, i * .22)),
-  click: () => tone(660, .05, 'square', .03)
+  click: () => tone(660, .05, 'square', .03),
+  buy: () => [523, 784, 1046, 1568].forEach((f, i) => tone(f, .12, 'triangle', .08, 0, i * .06)),
+  nope: () => tone(150, .15, 'square', .05)
 };
 
 // ---------- helpers ----------
 const rnd = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;
 const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 const shuffle = arr => { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; };
-function rrect(x, y, w, h, r) {
-  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+function rrect(c, x, y, w, h, r) {
+  c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
 }
 
 // ---------- settings / menu ----------
@@ -158,6 +203,205 @@ const RANKS = ['Cadet', 'Pilot', 'Commander'];
 let settings = store.get('nn-settings', { op: 'add', diff: 0 });
 if (!OPS[settings.op] || !RANKS[settings.diff]) settings = { op: 'add', diff: 0 };
 const hiKey = () => `nn-hi-${settings.op}-${settings.diff}`;
+
+// ---------- hangar: cosmetic upgrades (visual/sound only, never gameplay) ----------
+const SHOP = [
+  { key: 'hull', label: 'Hull', items: [
+    { id: 'scout', name: 'Scout', desc: 'Trusty starter frame', price: 0, power: 10 },
+    { id: 'arrow', name: 'Arrowhead', desc: 'Sleek long-nose racer', price: 300, power: 30 },
+    { id: 'twin', name: 'Twin-Wing', desc: 'Double wings, double style', price: 700, power: 55 },
+    { id: 'cruiser', name: 'Star Cruiser', desc: 'Heavy armored flagship', price: 1400, power: 90 } ] },
+  { key: 'paint', label: 'Paint', items: [
+    { id: 'ice', name: 'Ice Blue', desc: 'Factory finish', price: 0, power: 0, c: ['#3a6fd8', '#bff4ff', '#ff7ad9'] },
+    { id: 'ember', name: 'Ember', desc: 'Hot red and orange', price: 150, power: 10, c: ['#b8321f', '#ffc29e', '#ffd166'] },
+    { id: 'jungle', name: 'Jungle', desc: 'Planet-forest green', price: 150, power: 10, c: ['#1f7a3a', '#b8ffcf', '#ffd166'] },
+    { id: 'royal', name: 'Royal', desc: 'Deep space purple', price: 300, power: 20, c: ['#5b2aa8', '#e2c9ff', '#7fe7ff'] },
+    { id: 'gold', name: 'Solid Gold', desc: 'Shiny! Very shiny.', price: 900, power: 40, c: ['#a8751a', '#fff1b8', '#ffffff'] },
+    { id: 'galaxy', name: 'Galaxy Shift', desc: 'Colors that never stop moving', price: 1600, power: 60, c: null } ] },
+  { key: 'weapon', label: 'Weapon', items: [
+    { id: 'pulse', name: 'Pulse Laser', desc: 'Standard issue', price: 0, power: 10 },
+    { id: 'twin', name: 'Twin Blasters', desc: 'Two bolts side by side', price: 350, power: 35 },
+    { id: 'plasma', name: 'Plasma Orb', desc: 'Crackling energy ball', price: 800, power: 60 },
+    { id: 'trident', name: 'Trident Cannon', desc: 'Three-beam barrage', price: 1200, power: 85 },
+    { id: 'prism', name: 'Prism Beam', desc: 'Rainbow mega-ray', price: 2000, power: 120 } ] },
+  { key: 'engine', label: 'Engine', items: [
+    { id: 'chem', name: 'Chem Burner', desc: 'Classic orange flame', price: 0, power: 5 },
+    { id: 'ion', name: 'Ion Drive', desc: 'Cool blue thrust', price: 200, power: 20 },
+    { id: 'comet', name: 'Comet Tail', desc: 'Leaves a sparkle trail', price: 550, power: 40 },
+    { id: 'warp', name: 'Warp Core', desc: 'Rainbow hyper-flame', price: 1100, power: 70 } ] },
+  { key: 'blast', label: 'Explosion', items: [
+    { id: 'spark', name: 'Sparks', desc: 'Green and gold burst', price: 0, power: 0 },
+    { id: 'confetti', name: 'Confetti', desc: 'Party time!', price: 250, power: 15 },
+    { id: 'firework', name: 'Fireworks', desc: 'Colorful rings', price: 600, power: 30 },
+    { id: 'stars', name: 'Star Shower', desc: 'Bursts into tiny stars', price: 950, power: 45 } ] }
+];
+const RANK_TITLES = [[330, 'Galaxy Legend'], [230, 'Nova Knight'], [150, 'Starblazer'], [80, 'Ace'], [0, 'Rookie']];
+const catOf = k => SHOP.find(c => c.key === k);
+const itemOf = (k, id) => catOf(k).items.find(i => i.id === id) || catOf(k).items[0];
+
+function loadProfile() {
+  const p = store.get('nn-profile', null) || {};
+  const out = { dust: Math.max(0, Math.floor(+p.dust) || 0), owned: {}, eq: {} };
+  for (const c of SHOP) {
+    const ids = c.items.map(i => i.id);
+    const owned = Array.isArray(p.owned && p.owned[c.key]) ? p.owned[c.key].filter(id => ids.includes(id)) : [];
+    if (!owned.includes(ids[0])) owned.unshift(ids[0]);
+    out.owned[c.key] = owned;
+    out.eq[c.key] = p.eq && owned.includes(p.eq[c.key]) ? p.eq[c.key] : ids[0];
+  }
+  return out;
+}
+let prof = loadProfile();
+const saveProfile = () => store.set('nn-profile', prof);
+const shipPower = () => SHOP.reduce((s, c) => s + itemOf(c.key, prof.eq[c.key]).power, 0);
+const rankTitle = () => RANK_TITLES.find(([min]) => shipPower() >= min)[1];
+
+const HULLS = {
+  scout:   { pts: [[0, -30], [10, -6], [30, 12], [30, 18], [10, 12], [0, 18]], trim: [[29, 6, 4, 14]], eng: [0], ey: 14 },
+  arrow:   { pts: [[0, -42], [6, -16], [12, 0], [25, 17], [25, 22], [8, 15], [0, 20]], trim: [[24, 10, 3, 14], [10, -4, 3, 10]], eng: [0], ey: 16 },
+  twin:    { pts: [[0, -30], [9, -10], [18, -16], [34, 2], [34, 14], [22, 10], [28, 22], [10, 14], [0, 20]], trim: [[33, -2, 4, 16], [27, 12, 3, 10]], eng: [-6, 6], ey: 15 },
+  cruiser: { pts: [[0, -36], [8, -22], [14, -8], [26, -6], [37, 8], [37, 22], [16, 16], [12, 22], [0, 18]], trim: [[36, 4, 4, 20], [14, -12, 4, 14]], eng: [-11, 11], ey: 18 }
+};
+
+function paintColors(t) {
+  const it = itemOf('paint', prof.eq.paint);
+  if (it.c) return it.c;
+  const h = (t * 70) % 360;
+  return [`hsl(${h},70%,38%)`, `hsl(${(h + 60) % 360},95%,85%)`, `hsl(${(h + 180) % 360},95%,65%)`];
+}
+
+function drawFlame(c, ex, ey, t, engine) {
+  let len, w = 9, c0, c1;
+  if (engine === 'ion') { len = 14 + Math.random() * 12; c0 = '#e6fbff'; c1 = 'rgba(60,140,255,0)'; }
+  else if (engine === 'comet') { len = 16 + Math.random() * 12; c0 = '#ffffff'; c1 = 'rgba(190,140,255,0)'; }
+  else if (engine === 'warp') { len = 26 + Math.random() * 16; w = 11; const h = (t * 300) % 360; c0 = `hsl(${h},100%,85%)`; c1 = `hsla(${(h + 120) % 360},100%,60%,0)`; }
+  else { len = 10 + Math.random() * 10; c0 = '#fff3b0'; c1 = 'rgba(255,120,40,0)'; }
+  const fg = c.createLinearGradient(0, ey, 0, ey + 4 + len);
+  fg.addColorStop(0, c0); fg.addColorStop(1, c1);
+  c.fillStyle = fg;
+  c.beginPath(); c.moveTo(ex - w, ey); c.lineTo(ex, ey + 4 + len); c.lineTo(ex + w, ey); c.fill();
+}
+
+function drawShipAt(c, x, y, t) {
+  const hull = HULLS[prof.eq.hull] || HULLS.scout, [edge, mid, trim] = paintColors(t);
+  c.save(); c.translate(x, y);
+  for (const ex of hull.eng) drawFlame(c, ex, hull.ey, t, prof.eq.engine);
+  const right = hull.pts, left = right.slice(1, -1).reverse().map(([px, py]) => [-px, py]);
+  c.beginPath();
+  [...right, ...left].forEach(([px, py], i) => i ? c.lineTo(px, py) : c.moveTo(px, py));
+  c.closePath();
+  const bg = c.createLinearGradient(-38, 0, 38, 0);
+  bg.addColorStop(0, edge); bg.addColorStop(.5, mid); bg.addColorStop(1, edge);
+  c.shadowColor = mid; c.shadowBlur = 14; c.fillStyle = bg; c.fill(); c.shadowBlur = 0;
+  c.strokeStyle = 'rgba(0,0,0,.3)'; c.lineWidth = 1.5; c.stroke();
+  c.fillStyle = trim;
+  for (const [px, py, w, h] of hull.trim) { c.fillRect(px - w / 2, py, w, h); c.fillRect(-px - w / 2, py, w, h); }
+  c.fillStyle = '#1b1050';
+  c.beginPath(); c.ellipse(0, -4, 5, 10, 0, 0, Math.PI * 2); c.fill();
+  c.fillStyle = 'rgba(255,255,255,.7)';
+  c.beginPath(); c.ellipse(-1.5, -8, 1.6, 4, 0, 0, Math.PI * 2); c.fill();
+  c.restore();
+}
+
+function drawBolt(c, x, y, w, h, color, glow) {
+  c.shadowColor = glow; c.shadowBlur = 10; c.fillStyle = color;
+  rrect(c, x - w / 2, y - h / 2, w, h, w / 2); c.fill(); c.shadowBlur = 0;
+}
+// Every weapon is drawn around the same single projectile (same position, same hit circle).
+function drawLaser(c, l, t) {
+  switch (prof.eq.weapon) {
+    case 'twin':
+      drawBolt(c, l.x - 7, l.y, 4, 20, '#c9fbff', '#7fe7ff'); drawBolt(c, l.x + 7, l.y, 4, 20, '#c9fbff', '#7fe7ff'); break;
+    case 'plasma': {
+      const r = 7 + Math.sin(t * 40) * 1.5, gr = c.createRadialGradient(l.x, l.y, 1, l.x, l.y, r * 2);
+      gr.addColorStop(0, '#ffffff'); gr.addColorStop(.35, '#8dffb8'); gr.addColorStop(1, 'rgba(40,255,160,0)');
+      c.fillStyle = gr; c.beginPath(); c.arc(l.x, l.y, r * 2, 0, Math.PI * 2); c.fill(); break;
+    }
+    case 'trident':
+      drawBolt(c, l.x, l.y - 4, 5, 26, '#fff1b8', '#ffd166');
+      drawBolt(c, l.x - 12, l.y + 6, 4, 18, '#ffe08a', '#ffb347'); drawBolt(c, l.x + 12, l.y + 6, 4, 18, '#ffe08a', '#ffb347'); break;
+    case 'prism': {
+      const h = (t * 400 + l.y) % 360;
+      drawBolt(c, l.x, l.y + 6, 8, 44, `hsl(${h},100%,80%)`, `hsl(${(h + 90) % 360},100%,60%)`);
+      drawBolt(c, l.x, l.y + 6, 3, 40, '#ffffff', '#ffffff'); break;
+    }
+    default: drawBolt(c, l.x, l.y - 3, 5, 22, '#ffc2f0', '#ff7ad9');
+  }
+}
+
+function weaponSound() {
+  switch (prof.eq.weapon) {
+    case 'twin': tone(1300, .07, 'square', .03, -900); tone(1000, .07, 'square', .03, -700, .05); break;
+    case 'plasma': tone(300, .2, 'sine', .08, 500); break;
+    case 'trident': [900, 1150, 1400].forEach(f => tone(f, .1, 'square', .02, -700)); break;
+    case 'prism': tone(600, .22, 'sawtooth', .03, 1400); tone(1200, .15, 'triangle', .03, -600, .03); break;
+    default: tone(1100, .1, 'square', .035, -800);
+  }
+}
+
+function burstInto(list, x, y, color, n = 24, spd = 220) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, s = Math.random() * spd;
+    list.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: .5 + Math.random() * .6, max: 1.1, c: color, sz: 2 + Math.random() * 3 });
+  }
+}
+function blastFx(list, x, y) {
+  const style = prof.eq.blast;
+  if (style === 'confetti') {
+    const pal = ['#ff7ad9', '#7fe7ff', '#ffd166', '#6dff9c', '#ff9f43', '#b18cff'];
+    for (let i = 0; i < 60; i++) {
+      const a = -Math.PI / 2 + (Math.random() - .5) * 2.6, s = 120 + Math.random() * 260;
+      list.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 1 + Math.random() * .8, max: 1.8, c: pick(pal), sz: 5 + Math.random() * 4, shape: 'conf', grav: 380, rot: Math.random() * 6, vr: (Math.random() - .5) * 18 });
+    }
+  } else if (style === 'firework') {
+    const h = rnd(0, 360);
+    for (const [n, s, hue] of [[40, 260, h], [24, 150, (h + 140) % 360]])
+      for (let i = 0; i < n; i++) {
+        const a = i / n * Math.PI * 2;
+        list.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 1.1, max: 1.1, c: `hsl(${hue},100%,70%)`, sz: 3.5, grav: 60 });
+      }
+    burstInto(list, x, y, '#ffffff', 14, 80);
+  } else if (style === 'stars') {
+    for (let i = 0; i < 34; i++) {
+      const a = Math.random() * Math.PI * 2, s = 60 + Math.random() * 240;
+      list.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: .8 + Math.random() * .7, max: 1.5, c: pick(['#ffd166', '#fff6c8', '#ffffff', '#7fe7ff']), sz: 5 + Math.random() * 5, shape: 'star', rot: Math.random() * 6, vr: (Math.random() - .5) * 10 });
+    }
+  } else {
+    burstInto(list, x, y, '#6dff9c', 40, 300); burstInto(list, x, y, '#ffd166', 20, 180);
+  }
+}
+function emitTrail(list, x, y, dt) {
+  const eng = prof.eq.engine, hull = HULLS[prof.eq.hull] || HULLS.scout;
+  if (eng !== 'comet' && eng !== 'warp') return;
+  if (Math.random() > dt * 40) return;
+  for (const ex of hull.eng) {
+    const c = eng === 'warp' ? `hsl(${rnd(0, 360)},100%,70%)` : pick(['#ffffff', '#d9c2ff', '#9fe8ff']);
+    list.push({ x: x + ex + (Math.random() - .5) * 8, y: y + hull.ey + 14, vx: (Math.random() - .5) * 30, vy: 90 + Math.random() * 60, life: .6, max: .6, c, sz: eng === 'warp' ? 3 : 4, shape: eng === 'comet' ? 'star' : undefined, rot: 0, vr: 4 });
+  }
+}
+function stepParticles(list, dt) {
+  for (const p of list) {
+    p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= .97; p.vy *= .97;
+    if (p.grav) p.vy += p.grav * dt;
+    if (p.vr) p.rot += p.vr * dt;
+    p.life -= dt;
+  }
+  return list.filter(p => p.life > 0);
+}
+function drawParticles(c, list) {
+  for (const p of list) {
+    c.globalAlpha = Math.max(0, Math.min(1, p.life / p.max * 1.5));
+    c.fillStyle = p.c;
+    if (p.shape === 'conf') {
+      c.save(); c.translate(p.x, p.y); c.rotate(p.rot); c.fillRect(-p.sz / 2, -p.sz / 4, p.sz, p.sz / 2); c.restore();
+    } else if (p.shape === 'star') {
+      c.save(); c.translate(p.x, p.y); c.rotate(p.rot || 0); c.beginPath();
+      for (let k = 0; k < 10; k++) { const r = k % 2 ? p.sz * .42 : p.sz, a = k * Math.PI / 5 - Math.PI / 2; c.lineTo(Math.cos(a) * r, Math.sin(a) * r); }
+      c.closePath(); c.fill(); c.restore();
+    } else c.fillRect(p.x - p.sz / 2, p.y - p.sz / 2, p.sz, p.sz);
+  }
+  c.globalAlpha = 1;
+}
 
 function buildMenu() {
   const opRow = $('opRow'), diffRow = $('diffRow');
@@ -174,6 +418,8 @@ function buildMenu() {
   });
   const hi = store.get(hiKey(), 0);
   $('menuHi').textContent = hi ? `High score for this mission: ${hi}` : '';
+  $('menuDust').textContent = `✦ ${prof.dust} Stardust`;
+  $('menuPower').textContent = `Ship Power ${shipPower()} (${rankTitle()})`;
 }
 
 // ---------- problems ----------
@@ -253,12 +499,7 @@ function spawnWave() {
   });
 }
 
-function burst(x, y, color, n = 24, spd = 220) {
-  for (let i = 0; i < n; i++) {
-    const a = Math.random() * Math.PI * 2, s = Math.random() * spd;
-    parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: .5 + Math.random() * .6, max: 1.1, c: color, sz: 2 + Math.random() * 3 });
-  }
-}
+const burst = (x, y, color, n, spd) => burstInto(parts, x, y, color, n, spd);
 function floater(x, y, text, color, size = 26) { floats.push({ x, y, text, c: color, life: 1.4, size }); }
 
 function recordMiss() {
@@ -279,7 +520,7 @@ function hitCorrect(r) {
   const pts = 100 + (g.level - 1) * 20 + heightBonus + Math.min(g.streak - 1, 10) * 15;
   g.score += pts; g.correct++; g.prog++;
   problem.solved = true; panelGood = 1;
-  burst(r.x, r.y, '#6dff9c', 40, 300); burst(r.x, r.y, '#ffd166', 20, 180);
+  blastFx(parts, r.x, r.y);
   floater(r.x, r.y - 10, '+' + pts, '#6dff9c');
   if (g.streak >= 3) floater(r.x, r.y + 24, `${g.streak} in a row!`, '#ffd166', 18);
   rocks.forEach(o => { if (o !== r && !o.dying) { o.dying = .01; burst(o.x, o.y, '#9a8fb5', 10, 120); } });
@@ -317,7 +558,7 @@ function fire() {
   if (state !== 'play' || ship.cool > 0 || g.ending) return;
   ship.cool = .22;
   lasers.push({ x: ship.x, y: SHIP_Y - 26 });
-  sfx.laser();
+  weaponSound();
 }
 
 // ---------- update ----------
@@ -371,8 +612,8 @@ function update(dt) {
   if (g.ending) { g.ending -= dt; if (g.ending <= 0) gameOver(); }
 
   // fx
-  for (const p of parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= .97; p.vy *= .97; p.life -= dt; }
-  parts = parts.filter(p => p.life > 0);
+  if (g.lives > 0) emitTrail(parts, ship.x, SHIP_Y, dt);
+  parts = stepParticles(parts, dt);
   for (const f of floats) { f.y -= 30 * dt; f.life -= dt * .7; }
   floats = floats.filter(f => f.life > 0);
   panelFlash = Math.max(0, panelFlash - dt * 1.5);
@@ -418,27 +659,7 @@ function drawBackground(t) {
 
 function drawShip(x, y, t) {
   if (ship.inv > 0 && Math.floor(t * 20) % 2 === 0) return;
-  ctx.save(); ctx.translate(x, y);
-  const f = 10 + Math.random() * 10;
-  const fg = ctx.createLinearGradient(0, 14, 0, 18 + f);
-  fg.addColorStop(0, '#fff3b0'); fg.addColorStop(1, 'rgba(255,120,40,0)');
-  ctx.fillStyle = fg;
-  ctx.beginPath(); ctx.moveTo(-9, 14); ctx.lineTo(0, 18 + f); ctx.lineTo(9, 14); ctx.fill();
-  ctx.shadowColor = '#7fe7ff'; ctx.shadowBlur = 14;
-  const bg = ctx.createLinearGradient(-28, 0, 28, 0);
-  bg.addColorStop(0, '#3a6fd8'); bg.addColorStop(.5, '#bff4ff'); bg.addColorStop(1, '#3a6fd8');
-  ctx.fillStyle = bg;
-  ctx.beginPath();
-  ctx.moveTo(0, -30); ctx.lineTo(10, -6); ctx.lineTo(30, 12); ctx.lineTo(30, 18); ctx.lineTo(10, 12);
-  ctx.lineTo(0, 18); ctx.lineTo(-10, 12); ctx.lineTo(-30, 18); ctx.lineTo(-30, 12); ctx.lineTo(-10, -6); ctx.closePath();
-  ctx.fill();
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = '#ff7ad9'; ctx.fillRect(-31, 6, 4, 14); ctx.fillRect(27, 6, 4, 14);
-  ctx.fillStyle = '#1b1050';
-  ctx.beginPath(); ctx.ellipse(0, -4, 5, 10, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,.7)';
-  ctx.beginPath(); ctx.ellipse(-1.5, -8, 1.6, 4, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.restore();
+  drawShipAt(ctx, x, y, t);
 }
 
 function drawRock(r) {
@@ -472,7 +693,7 @@ function drawRock(r) {
 function drawHUD() {
   // problem panel
   const pw = 320, ph = 66, px = W / 2 - pw / 2, py = 12;
-  rrect(px, py, pw, ph, 14);
+  rrect(ctx, px, py, pw, ph, 14);
   ctx.fillStyle = panelFlash > 0 ? `rgba(${120 + 135 * panelFlash},30,60,.9)` : panelGood > 0 ? `rgba(20,${80 + 80 * panelGood},70,.9)` : 'rgba(20,14,55,.88)';
   ctx.fill();
   ctx.lineWidth = 3; ctx.strokeStyle = panelFlash > 0 ? '#ff5a6e' : panelGood > 0 ? '#6dff9c' : '#7fe7ff'; ctx.stroke();
@@ -499,6 +720,8 @@ function drawHUD() {
     ctx.fillStyle = i < g.prog ? '#6dff9c' : 'rgba(255,255,255,.15)';
     ctx.fillRect(18 + i * 12, 86, 9, 6);
   }
+  ctx.fillStyle = '#7fe7ff'; ctx.font = 'bold 12px "Trebuchet MS",sans-serif';
+  ctx.fillText(`SHIP POWER ${shipPower()} · ${rankTitle().toUpperCase()}`, 18, 112);
 
   // right: shields + streak
   ctx.textAlign = 'right';
@@ -523,12 +746,9 @@ function draw(t) {
   drawBackground(t);
   if (state === 'menu') { ctx.restore(); return; }
   for (const r of rocks) drawRock(r);
-  ctx.shadowColor = '#ff7ad9'; ctx.shadowBlur = 10; ctx.fillStyle = '#ffc2f0';
-  for (const l of lasers) { rrect(l.x - 2.5, l.y - 14, 5, 22, 2.5); ctx.fill(); }
-  ctx.shadowBlur = 0;
+  for (const l of lasers) drawLaser(ctx, l, t);
   if (g.lives > 0) drawShip(ship.x, SHIP_Y, t);
-  for (const p of parts) { ctx.globalAlpha = Math.max(0, p.life / p.max); ctx.fillStyle = p.c; ctx.fillRect(p.x - p.sz / 2, p.y - p.sz / 2, p.sz, p.sz); }
-  ctx.globalAlpha = 1;
+  drawParticles(ctx, parts);
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   for (const f of floats) {
     ctx.globalAlpha = Math.min(1, f.life);
@@ -555,13 +775,24 @@ function draw(t) {
 }
 
 // ---------- screens ----------
+let overlay = null;
 function showOverlay(id) {
-  ['menu', 'pause', 'over'].forEach(k => $(k).classList.toggle('hidden', k !== id));
+  overlay = id;
+  ['menu', 'pause', 'over', 'hangar'].forEach(k => $(k).classList.toggle('hidden', k !== id));
+  setPreview(id === 'hangar');
   $('hudBtns').classList.toggle('hidden', state !== 'play' && state !== 'pause');
 }
 function toMenu() { state = 'menu'; buildMenu(); showOverlay('menu'); }
 function pauseGame() { if (state !== 'play') return; state = 'pause'; showOverlay('pause'); }
 function resumeGame() { if (state !== 'pause') return; state = 'play'; showOverlay(null); last = performance.now(); }
+
+function awardDust() {
+  if (!g || g.awarded) return 0;
+  g.awarded = true;
+  const n = Math.floor(g.score / 10);
+  prof.dust += n; saveProfile();
+  return n;
+}
 
 function gameOver() {
   state = 'over'; sfx.over();
@@ -570,6 +801,8 @@ function gameOver() {
   const tries = g.correct + g.wrong + g.misses;
   const acc = tries ? Math.round(g.correct / tries * 100) : 0;
   $('newHi').classList.toggle('hidden', !isNew);
+  const earned = awardDust();
+  $('earned').textContent = `+${earned} Stardust earned · ${prof.dust} total`;
   $('stats').innerHTML =
     `<span>Score</span><b>${g.score}</b>` +
     `<span>Level reached</span><b>${g.level}</b>` +
@@ -587,11 +820,99 @@ $('btnStart').onclick = () => { ac(); sfx.click(); newGame(); };
 $('btnAgain').onclick = () => { sfx.click(); newGame(); };
 $('btnMenu').onclick = () => { sfx.click(); toMenu(); };
 $('btnResume').onclick = resumeGame;
-$('btnQuit').onclick = () => { sfx.click(); toMenu(); };
+$('btnQuit').onclick = () => { sfx.click(); awardDust(); toMenu(); };
+$('btnHangar').onclick = () => { sfx.click(); openHangar('menu'); };
+$('btnOverHangar').onclick = () => { sfx.click(); openHangar('over'); };
+$('btnHgBack').onclick = () => { sfx.click(); closeHangar(); };
 $('btnPause').onclick = () => state === 'pause' ? resumeGame() : pauseGame();
 function updateMute() { $('btnMute').textContent = muted ? 'Sound: Off' : 'Sound: On'; }
 $('btnMute').onclick = () => { muted = !muted; store.set('nn-muted', muted); updateMute(); };
 updateMute();
+
+// ---------- hangar screen ----------
+let hgTab = 'hull', hgReturn = 'menu', justBought = null;
+function openHangar(from) { hgReturn = from; renderHangar(); showOverlay('hangar'); }
+function closeHangar() { if (hgReturn === 'menu') toMenu(); else showOverlay('over'); }
+
+function renderHangar() {
+  $('hgDust').textContent = `✦ ${prof.dust} Stardust`;
+  $('hgPower').textContent = `Ship Power ${shipPower()} · ${rankTitle()}`;
+  const tabs = $('tabs'), items = $('items');
+  tabs.innerHTML = ''; items.innerHTML = '';
+  for (const c of SHOP) {
+    const b = document.createElement('button'); b.textContent = c.label;
+    if (c.key === hgTab) b.className = 'sel';
+    b.onclick = () => { hgTab = c.key; sfx.click(); renderHangar(); };
+    tabs.appendChild(b);
+  }
+  for (const it of catOf(hgTab).items) {
+    const owned = prof.owned[hgTab].includes(it.id), eq = prof.eq[hgTab] === it.id;
+    const b = document.createElement('button');
+    b.className = 'item ' + (eq ? 'equipped' : owned ? 'owned' : prof.dust >= it.price ? '' : 'locked') + (justBought === it.id ? ' bought' : '');
+    const status = eq ? '✔ Equipped' : owned ? 'Owned · tap to equip' : prof.dust >= it.price ? `✦ ${it.price} · tap to buy` : `✦ ${it.price} · need ${it.price - prof.dust} more`;
+    b.innerHTML = `<span class="nm">${it.name}</span><span class="ds">${it.desc} · +${it.power} power</span><span class="pr">${status}</span>`;
+    b.onclick = () => buyOrEquip(it);
+    items.appendChild(b);
+  }
+  justBought = null;
+}
+
+function buyOrEquip(it) {
+  const owned = prof.owned[hgTab];
+  if (owned.includes(it.id)) { prof.eq[hgTab] = it.id; sfx.click(); }
+  else if (prof.dust >= it.price) {
+    prof.dust -= it.price; owned.push(it.id); prof.eq[hgTab] = it.id; justBought = it.id; sfx.buy();
+    blastFx(pv.parts, PW / 2, PH / 2);
+  } else { sfx.nope(); return; }
+  saveProfile(); renderHangar();
+}
+
+// live preview: the ship firing at a practice target
+const pvc = $('preview'), pctx = pvc.getContext('2d'), PW = 240, PH = 304;
+pvc.width = PW * 2; pvc.height = PH * 2; pctx.setTransform(2, 0, 0, 2, 0, 0);
+const pv = { on: false, last: 0, cool: .4, lasers: [], parts: [], hide: 0, stars: [] };
+for (let i = 0; i < 50; i++) pv.stars.push({ x: Math.random() * PW, y: Math.random() * PH, z: Math.random() * .9 + .1 });
+const TARGET = { x: PW / 2, y: 62, r: 28, pts: [.9, .8, 1, .85, .95, .8, 1, .9, .85], rot: 0 };
+
+function setPreview(on) {
+  if (on && !pv.on) { pv.on = true; pv.last = performance.now(); requestAnimationFrame(pvFrame); }
+  pv.on = on;
+}
+function pvFrame(now) {
+  if (!pv.on) return;
+  const dt = Math.min(.05, (now - pv.last) / 1000), t = now / 1000; pv.last = now;
+  const sx = PW / 2 + Math.sin(t * 1.2) * 40, sy = PH - 46;
+  TARGET.x = sx;
+  pv.cool -= dt;
+  if (pv.cool <= 0) { pv.lasers.push({ x: sx, y: sy - 26 }); pv.cool = .75; }
+  for (const l of pv.lasers) l.y -= 420 * dt;
+  pv.lasers = pv.lasers.filter(l => {
+    if (pv.hide <= 0 && Math.hypot(l.x - TARGET.x, l.y - TARGET.y) < TARGET.r + 4) { blastFx(pv.parts, TARGET.x, TARGET.y); pv.hide = .6; return false; }
+    return l.y > -20;
+  });
+  pv.hide -= dt; TARGET.rot += dt * .6;
+  emitTrail(pv.parts, sx, sy, dt);
+  pv.parts = stepParticles(pv.parts, dt);
+  for (const s of pv.stars) { s.y += 30 * s.z * dt; if (s.y > PH) { s.y = 0; s.x = Math.random() * PW; } }
+
+  const c = pctx;
+  const bg = c.createLinearGradient(0, 0, 0, PH);
+  bg.addColorStop(0, '#05030f'); bg.addColorStop(1, '#24104a');
+  c.fillStyle = bg; c.fillRect(0, 0, PW, PH);
+  for (const s of pv.stars) { c.globalAlpha = .3 + .7 * s.z; c.fillStyle = '#fff'; c.fillRect(s.x, s.y, s.z * 2, s.z * 2); }
+  c.globalAlpha = 1;
+  if (pv.hide <= 0) {
+    c.save(); c.translate(TARGET.x, TARGET.y); c.rotate(TARGET.rot); c.beginPath();
+    TARGET.pts.forEach((m, k) => { const a = k / TARGET.pts.length * Math.PI * 2; c.lineTo(Math.cos(a) * TARGET.r * m, Math.sin(a) * TARGET.r * m); });
+    c.closePath(); c.fillStyle = '#5a4a78'; c.fill(); c.strokeStyle = '#b9a8e0'; c.lineWidth = 2; c.stroke(); c.restore();
+    c.fillStyle = '#fff'; c.font = 'bold 24px "Trebuchet MS",sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText('?', TARGET.x, TARGET.y + 1);
+  }
+  for (const l of pv.lasers) drawLaser(c, l, t);
+  drawShipAt(c, sx, sy, t);
+  drawParticles(c, pv.parts);
+  requestAnimationFrame(pvFrame);
+}
 
 // ---------- input ----------
 addEventListener('keydown', e => {
@@ -599,7 +920,7 @@ addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'KeyP' || e.code === 'Escape') { state === 'play' ? pauseGame() : state === 'pause' && resumeGame(); }
   if (e.code === 'KeyM') { muted = !muted; store.set('nn-muted', muted); updateMute(); }
-  if (e.code === 'Enter') {
+  if (e.code === 'Enter' && overlay !== 'hangar') {
     if (state === 'menu') { ac(); newGame(); }
     else if (state === 'over') newGame();
     else if (state === 'pause') resumeGame();
