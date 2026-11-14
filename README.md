@@ -9,6 +9,8 @@ The whole game is a single file, `index.html`, with no dependencies. Open it in 
 - Missions: addition, subtraction, multiplication, division, or mixed
 - Ranks: Cadet, Pilot, Commander
 - Levels speed up every 10 correct answers; streak and speed bonuses
+- Adaptive difficulty: correct answers make problems harder (faster the longer your streak), mistakes ease them off. Your chosen rank sets the starting point and the range it can move within, and your level is remembered for next time.
+- Review: missed problems come back as ★ Review problems, spaced out, until you get each one right 3 times
 - End-of-game summary with accuracy and a "Practice these" list of missed problems
 - High scores saved per mission and rank
 - Hangar: earn Stardust from your score and spend it on new hulls, paint jobs, weapons, engine trails and explosion effects. Upgrades raise your Ship Power and rank title, but they're purely cosmetic: every ship plays exactly the same.

@@ -102,6 +102,7 @@
       <div id="missedWrap" class="hidden">
         <div class="label">Practice these</div>
         <div class="missed" id="missed"></div>
+        <div class="hint" style="margin:.3em 0 0">These will come back as ★ Review problems until you get each one right 3 times.</div>
       </div>
       <div class="row">
         <button class="big" id="btnAgain">PLAY AGAIN</button>
@@ -423,28 +424,74 @@ function buildMenu() {
 }
 
 // ---------- problems ----------
-function makeProblem() {
-  const op = settings.op === 'mix' ? pick(['add', 'sub', 'mul', 'div']) : settings.op;
-  const d = settings.diff, L = Math.min(g.level - 1, 5);
+// ---------- adaptive difficulty ----------
+// Skill runs from 0 (easiest) to 1 (hardest). The chosen rank sets where you start and the band you move within.
+const BANDS = [{ lo: 0, hi: .35, start: .05 }, { lo: .15, hi: .65, start: .25 }, { lo: .4, hi: 1, start: .5 }];
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const skillKey = () => `nn-skill-${settings.op}-${settings.diff}`;
+const band = () => BANDS[settings.diff];
+function startSkill() {
+  const b = band(), saved = store.get(skillKey(), null);
+  return clamp(typeof saved === 'number' && isFinite(saved) ? saved - .05 : b.start, b.lo, b.hi);
+}
+const challengeTier = s => clamp(Math.floor((s - band().lo) / (band().hi - band().lo) * 10) + 1, 1, 10);
+function nudgeSkill(delta) {
+  const b = band(), before = challengeTier(g.skill);
+  g.skill = clamp(g.skill + delta * (b.hi - b.lo), b.lo, b.hi);
+  store.set(skillKey(), g.skill);
+  const after = challengeTier(g.skill);
+  g.bestTier = Math.max(g.bestTier, after);
+  if (after > before) { floater(W / 2, 150, 'Challenge up!', '#ffd166', 22); g.tierFlash = 1; }
+  else if (after < before) { floater(W / 2, 150, 'Easing off a little', '#9fb8ff', 18); g.tierFlash = -1; }
+}
+
+function genProblem(op, s) {
   let a, b, ans, sym;
   if (op === 'add' || op === 'sub') {
-    const max = [10, 50, 200][d] + L * [2, 10, 40][d];
-    if (op === 'add') { a = rnd(d ? 2 : 0, max); b = rnd(d ? 2 : 0, max); ans = a + b; sym = '+'; }
-    else { a = rnd(d ? 5 : 1, max); b = rnd(0, a); ans = a - b; sym = '−'; }
+    const max = Math.round(6 + 494 * s * s), lo = Math.floor(max * .15 * s);
+    if (op === 'add') { a = rnd(lo, max); b = rnd(lo, max); ans = a + b; sym = '+'; }
+    else { a = rnd(Math.max(1, Math.floor(max * .3)), max); b = rnd(Math.floor(a * .3 * s), a); ans = a - b; sym = '−'; }
   } else {
-    const max = [5, 10, 12][d] + Math.floor(L / 2);
-    const lo = d ? 2 : 0;
-    if (op === 'mul') {
-      a = rnd(lo, max); b = rnd(lo, max);
-      if (d === 2 && Math.random() < .25) a = rnd(13, 25);
-      ans = a * b; sym = '×';
-    } else {
-      b = rnd(Math.max(1, lo), max); ans = rnd(lo, max);
-      if (d === 2 && Math.random() < .25) ans = rnd(13, 25);
-      a = b * ans; sym = '÷';
-    }
+    const max = Math.round(5 + 10 * s), lo = s < .15 ? 0 : s < .5 ? 1 : 2;
+    const big = Math.random() < Math.max(0, (s - .7) * 1.5), bigN = () => rnd(11, 12 + Math.round(13 * s));
+    if (op === 'mul') { a = big ? bigN() : rnd(lo, max); b = rnd(lo, max); ans = a * b; sym = '×'; }
+    else { b = rnd(Math.max(1, lo), max); ans = big ? bigN() : rnd(lo, max); a = b * ans; sym = '÷'; }
   }
   return { text: `${a} ${sym} ${b}`, a, b, ans, op, solved: false, missed: false };
+}
+function fromParts(op, a, b) {
+  const sym = { add: '+', sub: '−', mul: '×', div: '÷' }[op];
+  const ans = op === 'add' ? a + b : op === 'sub' ? a - b : op === 'mul' ? a * b : a / b;
+  return { text: `${a} ${sym} ${b}`, a, b, ans, op, solved: false, missed: false };
+}
+
+// ---------- review pool: missed problems come back until answered right 3 times ----------
+const POOL_KEY = 'nn-review', REPS = 3;
+let pool = (store.get(POOL_KEY, []) || []).filter(e => e && OPS[e.op] && e.op !== 'mix' && Number.isInteger(e.a) && Number.isInteger(e.b) && e.due > 0);
+const savePool = () => store.set(POOL_KEY, pool);
+const sameProblem = (e, p) => e.op === p.op && ((e.a === p.a && e.b === p.b) || ((p.op === 'add' || p.op === 'mul') && e.a === p.b && e.b === p.a));
+const opAllowed = op => settings.op === 'mix' || settings.op === op;
+function poolAdd(p) {
+  let e = pool.find(x => sameProblem(x, p));
+  if (!e) { e = { op: p.op, a: p.a, b: p.b }; pool.push(e); if (pool.length > 40) pool.shift(); }
+  e.due = REPS; e.wait = 2;
+  savePool();
+}
+
+function makeProblem() {
+  for (const e of pool) if (opAllowed(e.op)) e.wait--;
+  const ready = pool.filter(e => opAllowed(e.op) && e.wait <= 0);
+  if (ready.length && Math.random() < .7) {
+    const e = pick(ready);
+    const swap = (e.op === 'add' || e.op === 'mul') && Math.random() < .5;
+    const p = swap ? fromParts(e.op, e.b, e.a) : fromParts(e.op, e.a, e.b);
+    p.review = e;
+    return p;
+  }
+  const op = settings.op === 'mix' ? pick(['add', 'sub', 'mul', 'div']) : settings.op;
+  let p, tries = 0;
+  do p = genProblem(op, g.skill); while (problem && p.text === problem.text && ++tries < 6);
+  return p;
 }
 function answerChoices(p) {
   const { a, b, ans, op } = p;
@@ -473,7 +520,8 @@ const stars = [];
 for (let i = 0; i < 140; i++) stars.push({ x: Math.random() * W, y: Math.random() * H, z: Math.random() * .9 + .1, tw: Math.random() * 6 });
 
 function newGame() {
-  g = { score: 0, lives: 3, level: 1, prog: 0, correct: 0, wrong: 0, misses: 0, streak: 0, best: 0, missedList: [], ending: 0 };
+  g = { score: 0, lives: 3, level: 1, prog: 0, correct: 0, wrong: 0, misses: 0, streak: 0, best: 0, missedList: [], ending: 0, skill: startSkill(), bestTier: 1, tierFlash: 0, mastered: 0 };
+  g.bestTier = challengeTier(g.skill);
   ship = { x: W / 2, tx: null, cool: 0, inv: 0 };
   lasers = []; rocks = []; parts = []; floats = [];
   problem = null; panelFlash = 0; panelGood = 0; shake = 0;
@@ -503,7 +551,11 @@ const burst = (x, y, color, n, spd) => burstInto(parts, x, y, color, n, spd);
 function floater(x, y, text, color, size = 26) { floats.push({ x, y, text, c: color, life: 1.4, size }); }
 
 function recordMiss() {
-  if (!problem.missed) { problem.missed = true; g.missedList.push(`${problem.text} = ${problem.ans}`); }
+  if (problem.missed) return;
+  problem.missed = true;
+  g.missedList.push(`${problem.text} = ${problem.ans}`);
+  poolAdd(problem);
+  nudgeSkill(-.12);
 }
 
 function loseLife() {
@@ -517,7 +569,18 @@ function loseLife() {
 function hitCorrect(r) {
   const heightBonus = Math.max(0, Math.round((1 - r.y / GROUND) * 100));
   g.streak++; g.best = Math.max(g.best, g.streak);
-  const pts = 100 + (g.level - 1) * 20 + heightBonus + Math.min(g.streak - 1, 10) * 15;
+  const pts = 100 + (g.level - 1) * 20 + heightBonus + Math.min(g.streak - 1, 10) * 15 + Math.round(g.skill * 150);
+  if (!problem.missed) {
+    const quick = r.y < GROUND * .5 ? .01 : 0;
+    nudgeSkill((.02 + .012 * Math.min(g.streak, 6) + quick) * (problem.review ? .5 : 1));
+    const e = problem.review;
+    if (e && pool.includes(e)) {
+      e.due--;
+      if (e.due <= 0) { pool = pool.filter(x => x !== e); g.mastered++; floater(r.x, r.y + 46, 'Mastered!', '#7fe7ff', 20); }
+      else { e.wait = 3 + (REPS - e.due) * 3; floater(r.x, r.y + 46, 'Review ✓', '#7fe7ff', 16); }
+      savePool();
+    }
+  }
   g.score += pts; g.correct++; g.prog++;
   problem.solved = true; panelGood = 1;
   blastFx(parts, r.x, r.y);
@@ -617,6 +680,7 @@ function update(dt) {
   for (const f of floats) { f.y -= 30 * dt; f.life -= dt * .7; }
   floats = floats.filter(f => f.life > 0);
   panelFlash = Math.max(0, panelFlash - dt * 1.5);
+  if (g.tierFlash) g.tierFlash = g.tierFlash > 0 ? Math.max(0, g.tierFlash - dt * .6) : Math.min(0, g.tierFlash + dt * .6);
   panelGood = Math.max(0, panelGood - dt * 1.2);
   shake = Math.max(0, shake - dt * 30);
   if (banner) { banner.t -= dt; if (banner.t <= 0) banner = null; }
@@ -703,6 +767,11 @@ function drawHUD() {
   if (problem && !(waveDelay > 0 && !problem.solved && !problem.missed && rocks.length === 0)) {
     ctx.fillStyle = '#fff';
     ctx.fillText(problem.text + ' = ' + (problem.solved ? problem.ans : '?'), W / 2 + ox, py + ph / 2 + 2);
+    if (problem.review) {
+      rrect(ctx, W / 2 - 42, py + ph - 8, 84, 18, 9); ctx.fillStyle = '#ffd166'; ctx.fill();
+      ctx.fillStyle = '#1b1050'; ctx.font = 'bold 12px "Trebuchet MS",sans-serif';
+      ctx.fillText('★ REVIEW', W / 2, py + ph + 1);
+    }
   } else {
     ctx.fillStyle = '#9fb8ff'; ctx.font = 'bold 24px "Trebuchet MS",sans-serif';
     ctx.fillText('Incoming…', W / 2, py + ph / 2 + 2);
@@ -734,9 +803,20 @@ function drawHUD() {
     ctx.fillStyle = i < g.lives ? '#7fe7ff' : 'rgba(255,255,255,.08)'; ctx.fill();
     ctx.restore();
   }
+  ctx.fillStyle = '#9fb8ff'; ctx.font = 'bold 13px "Trebuchet MS",sans-serif';
+  ctx.fillText('CHALLENGE', W - 18, 80);
+  const tier = challengeTier(g.skill);
+  for (let i = 0; i < 10; i++) {
+    ctx.fillStyle = i < tier ? `hsl(${150 - i * 15},90%,60%)` : 'rgba(255,255,255,.15)';
+    ctx.fillRect(W - 18 - (10 - i) * 12 + 3, 86, 9, 6);
+  }
+  if (g.tierFlash) {
+    ctx.fillStyle = g.tierFlash > 0 ? '#ffd166' : '#9fb8ff';
+    ctx.fillText(g.tierFlash > 0 ? '▲' : '▼', W - 140, 92);
+  }
   if (g.streak >= 2) {
     ctx.fillStyle = '#ffd166'; ctx.font = 'bold 15px "Trebuchet MS",sans-serif';
-    ctx.fillText('STREAK ×' + g.streak, W - 18, 84);
+    ctx.fillText('STREAK ×' + g.streak, W - 18, 114);
   }
 }
 
@@ -809,6 +889,8 @@ function gameOver() {
     `<span>Correct answers</span><b>${g.correct}</b>` +
     `<span>Accuracy</span><b>${acc}%</b>` +
     `<span>Best streak</span><b>${g.best}</b>` +
+    `<span>Challenge reached</span><b>${g.bestTier} / 10</b>` +
+    (g.mastered ? `<span>Problems mastered</span><b>${g.mastered}</b>` : '') +
     `<span>High score</span><b>${Math.max(hi, g.score)}</b>`;
   const list = g.missedList.slice(-8);
   $('missedWrap').classList.toggle('hidden', !list.length);
